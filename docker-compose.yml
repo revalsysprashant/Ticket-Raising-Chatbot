@@ -1,0 +1,12 @@
+services:
+  chatbot:
+    build: .
+    container_name: ticket_raising_chatbot
+    ports:
+      - "7000:7000"
+    volumes:
+      # Map the SQLite database to the host to prevent data loss when container restarts
+      - ./app.db:/app/app.db
+    env_file:
+      - .env
+    restart: unless-stopped
