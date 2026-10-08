@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+qdrant-client
+sentence-transformers
+pydantic
+email-validator
+sqlalchemy
+langchain-huggingface
+openai
+python-dotenv

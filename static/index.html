@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Support Desk — Chat</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+  <div class="app-shell">
+    <main class="main-col">
+      <div class="chat-header">
+        <div>
+          <span class="desk-badge">Support Desk</span>
+          <h2>Hi, <span id="userEmail">there</span></h2>
+        </div>
+        <button class="logout-btn" id="logoutBtn">LOG OUT</button>
+      </div>
+
+      <div class="chat-log" id="chatLog"></div>
+
+      <div class="chat-input-row">
+        <input type="text" id="chatInput" placeholder="Ask about orders, returns, cancellations…" autocomplete="off">
+        <button id="sendBtn">Send</button>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const token = localStorage.getItem('support_token');
+    const email = localStorage.getItem('support_email');
+    if (!token) {
+      window.location.href = '/';
+    }
+    document.getElementById('userEmail').textContent = email ? email.split('@')[0] : 'there';
+
+    const sessionId = 'session_' + Math.random().toString(36).slice(2, 12);
+    const chatLog = document.getElementById('chatLog');
+    const chatInput = document.getElementById('chatInput');
+    const sendBtn = document.getElementById('sendBtn');
+
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      await fetch('/api/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } });
+      localStorage.removeItem('support_token');
+      localStorage.removeItem('support_email');
+      window.location.href = '/';
+    });
+
+    function addMessage(text, role) {
+      const div = document.createElement('div');
+      div.className = 'msg ' + role;
+      div.textContent = text;
+      chatLog.appendChild(div);
+      chatLog.scrollTop = chatLog.scrollHeight;
+      return div;
+    }
+
+    function addSystemNote(text) {
+      const div = document.createElement('div');
+      div.className = 'msg system';
+      div.textContent = text;
+      chatLog.appendChild(div);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    function addProductOptions(products) {
+      const row = document.createElement('div');
+      row.className = 'option-row';
+      products.forEach(p => {
+        const btn = document.createElement('button');
+        btn.className = 'option-btn';
+        btn.textContent = p.name;
+        btn.addEventListener('click', () => {
+          row.querySelectorAll('button').forEach(b => b.disabled = true);
+          row.style.opacity = '0.5';
+          sendMessage('I want to cancel my ' + p.name, true);
+        });
+        row.appendChild(btn);
+      });
+      chatLog.appendChild(row);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    function addTicketForm(reason, orderId) {
+      const wrap = document.createElement('div');
+      wrap.className = 'ticket-form';
+      wrap.innerHTML = `
+      <label class="section-label" style="margin:0;">Raise a support ticket</label>
+      <input type="email" placeholder="Your email" id="tf_email" value="${email || ''}">
+      <input type="text" placeholder="Order ID (optional)" id="tf_order" value="${orderId || ''}">
+      <textarea id="tf_issue" placeholder="Describe the issue">${reason || ''}</textarea>
+      <button id="tf_submit">Submit ticket</button>
+    `;
+      chatLog.appendChild(wrap);
+      chatLog.scrollTop = chatLog.scrollHeight;
+
+      wrap.querySelector('#tf_submit').addEventListener('click', async () => {
+        const payload = {
+          user_email: wrap.querySelector('#tf_email').value.trim(),
+          order_id: wrap.querySelector('#tf_order').value.trim() || 'N/A',
+          issue_description: wrap.querySelector('#tf_issue').value.trim()
+        };
+        wrap.querySelector('#tf_submit').disabled = true;
+        wrap.querySelector('#tf_submit').textContent = 'Submitting…';
+        try {
+          const res = await fetch('/api/raise-ticket', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const data = await res.json();
+          wrap.remove();
+          addSystemNote(data.message || 'Ticket submitted.');
+        } catch (err) {
+          wrap.querySelector('#tf_submit').textContent = 'Failed — try again';
+          wrap.querySelector('#tf_submit').disabled = false;
+        }
+      });
+    }
+
+    async function sendMessage(text, isFromButton) {
+      if (!text) return;
+      if (!isFromButton) {
+        addMessage(text, 'user');
+      } else {
+        addMessage(text, 'user');
+      }
+      chatInput.value = '';
+      sendBtn.disabled = true;
+
+      const typingEl = document.createElement('div');
+      typingEl.className = 'msg bot';
+      typingEl.innerHTML = '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>';
+      chatLog.appendChild(typingEl);
+      chatLog.scrollTop = chatLog.scrollHeight;
+
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify({ session_id: sessionId, user_query: text })
+        });
+
+        if (res.status === 401) {
+          localStorage.removeItem('support_token');
+          window.location.href = '/';
+          return;
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let botText = '';
+        let botEl = null;
+        let pendingProducts = null;
+        let pendingTicket = null;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split('\n\n');
+          buffer = parts.pop();
+
+          for (const part of parts) {
+            if (!part.startsWith('data:')) continue;
+            const jsonStr = part.slice(5).trim();
+            if (!jsonStr) continue;
+            const payload = JSON.parse(jsonStr);
+
+            if (typingEl.parentNode) typingEl.remove();
+
+            if (payload.type === 'token') {
+              if (!botEl) botEl = addMessage('', 'bot');
+              botText += payload.content;
+              botEl.textContent = botText;
+              chatLog.scrollTop = chatLog.scrollHeight;
+            } else if (payload.type === 'product_select') {
+              addMessage(payload.reply, 'bot');
+              pendingProducts = payload.products;
+            } else if (payload.type === 'cancel_info') {
+              addMessage(payload.reply, 'bot');
+              pendingTicket = { reason: 'Cancel order: ' + payload.product.name, orderId: payload.product.id };
+            } else if (payload.type === 'tool_call') {
+              addMessage(payload.reply, 'bot');
+              pendingTicket = { reason: payload.reason, orderId: payload.order_id };
+            }
+          }
+        }
+
+        if (pendingProducts) addProductOptions(pendingProducts);
+        if (pendingTicket) addTicketForm(pendingTicket.reason, pendingTicket.orderId);
+
+      } catch (err) {
+        if (typingEl.parentNode) typingEl.remove();
+        addMessage('Sorry, something went wrong reaching the support desk. Please try again.', 'bot');
+      } finally {
+        sendBtn.disabled = false;
+        chatInput.focus();
+      }
+    }
+
+    sendBtn.addEventListener('click', () => sendMessage(chatInput.value.trim(), false));
+    chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') sendMessage(chatInput.value.trim(), false);
+    });
+
+    addMessage("Hello! I'm your support assistant. Ask me about orders, returns, warranty, or say \"I want to cancel my product\" to get started.", 'bot');
+  </script>
+</body>
+
+</html>

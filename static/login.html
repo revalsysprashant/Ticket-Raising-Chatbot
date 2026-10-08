@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Support Desk — Sign in</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="auth-wrap">
+  <div class="ticket">
+    <div class="ticket-head">
+      <div>
+        <span class="desk-badge">Support Desk</span>
+        <h1 id="formTitle">Sign in</h1>
+      </div>
+      <span class="ticket-no mono" id="ticketNo">NO. 000000</span>
+    </div>
+
+    <form id="authForm">
+      <label for="email">Email</label>
+      <input type="email" id="email" placeholder="you@example.com" required>
+
+      <label for="password">Password</label>
+      <input type="password" id="password" placeholder="••••••••" required minlength="6">
+
+      <div class="error-msg" id="errorMsg"></div>
+
+      <button class="btn" type="submit" id="submitBtn">Sign in</button>
+    </form>
+
+    <div class="switch-line">
+      <span id="switchText">Don't have an account?</span>
+      <a id="switchLink">Create one</a>
+    </div>
+  </div>
+</div>
+
+<script>
+  const ticketNo = document.getElementById('ticketNo');
+  ticketNo.textContent = 'NO. ' + String(Math.floor(Math.random() * 900000) + 100000);
+
+  let mode = 'login'; // or 'signup'
+  const form = document.getElementById('authForm');
+  const formTitle = document.getElementById('formTitle');
+  const submitBtn = document.getElementById('submitBtn');
+  const switchText = document.getElementById('switchText');
+  const switchLink = document.getElementById('switchLink');
+  const errorMsg = document.getElementById('errorMsg');
+
+  // If already logged in, skip straight to chat.
+  if (localStorage.getItem('support_token')) {
+    window.location.href = '/chat';
+  }
+
+  switchLink.addEventListener('click', () => {
+    mode = mode === 'login' ? 'signup' : 'login';
+    errorMsg.textContent = '';
+    if (mode === 'signup') {
+      formTitle.textContent = 'Create account';
+      submitBtn.textContent = 'Create account';
+      switchText.textContent = 'Already have an account?';
+      switchLink.textContent = 'Sign in';
+    } else {
+      formTitle.textContent = 'Sign in';
+      submitBtn.textContent = 'Sign in';
+      switchText.textContent = "Don't have an account?";
+      switchLink.textContent = 'Create one';
+    }
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorMsg.textContent = '';
+    submitBtn.disabled = true;
+    submitBtn.textContent = mode === 'login' ? 'Signing in…' : 'Creating…';
+
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    const endpoint = mode === 'login' ? '/api/login' : '/api/signup';
+
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Something went wrong.');
+      }
+      localStorage.setItem('support_token', data.token);
+      localStorage.setItem('support_email', data.email);
+      window.location.href = '/chat';
+    } catch (err) {
+      errorMsg.textContent = err.message;
+      submitBtn.disabled = false;
+      submitBtn.textContent = mode === 'login' ? 'Sign in' : 'Create account';
+    }
+  });
+</script>
+</body>
+</html>
